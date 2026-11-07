@@ -1,144 +1,136 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 
-G = 9.81
 
-MODEL_NAMES = {
-    "none": "Без сопротивления",
-    "linear": "Вязкое  F = k·v",
-    "quadratic": "Лобовое  F = k·v²",
-}
+def omega0(k, m):
+    return np.sqrt(k / m)
 
 
-def derivatives(t, state, m, g, k, model):
-    x, y, vx, vy = state
-    if model == "linear":
-        ax = -k / m * vx
-        ay = -g - k / m * vy
-    elif model == "quadratic":
-        v = np.hypot(vx, vy)
-        ax = -k / m * v * vx
-        ay = -g - k / m * v * vy
+def wave_speed(k, m, a):
+    return a * omega0(k, m)
+
+
+def mode_q(n, N):
+    return np.pi * n / (N + 1)
+
+
+def mode_omega(n, N, k, m):
+    return 2 * omega0(k, m) * np.sin(mode_q(n, N) / 2)
+
+
+def is_node(n, N, j0):
+    return abs(np.sin(mode_q(n, N) * j0)) < 1e-9
+
+
+def long_side(N, j0):
+    if N - j0 >= j0 - 1:
+        return 1, N - j0
+    return -1, j0 - 1
+
+
+def spring_acc(u, k, m, ends):
+    if ends == "fixed":
+        left, right = 0.0, 0.0
     else:
-        ax = 0.0
-        ay = -g
-    return [vx, vy, ax, ay]
+        left, right = u[0], u[-1]
+    full = np.concatenate(([left], u, [right]))
+    return k / m * (full[2:] - 2 * u + full[:-2])
 
 
-def flight_time_no_drag(v0, alpha, h0, g=G):
-    vy0 = v0 * np.sin(np.radians(alpha))
-    return (vy0 + np.sqrt(vy0**2 + 2 * g * h0)) / g
+def pulse_law(t, A, tau):
+    w = 2 * np.pi / tau
+    pos = A / 2 * (1 - np.cos(w * t))
+    vel = A * w / 2 * np.sin(w * t)
+    acc = A * w**2 / 2 * np.cos(w * t)
+    return pos, vel, acc
 
 
-def make_result(t, Y, T, t_top, H):
-    x, y, vx, vy = Y
-    return dict(t=t, x=x, y=y, vx=vx, vy=vy, T=T, L=x[-1], H=H, t_top=t_top,
-                v_end=float(np.hypot(vx[-1], vy[-1])))
+def pulse_derivatives(t, state, k, m, ends, j0, A, tau):
+    N = len(state) // 2
+    vel = state[N:].copy()
+    acc = spring_acc(state[:N], k, m, ends)
+    if t < tau:
+        _, vel[j0 - 1], acc[j0 - 1] = pulse_law(t, A, tau)
+    return np.concatenate((vel, acc))
 
 
-def hit_ground(t, s, *args):
-    return s[1]
+def forced_derivatives(t, state, k, m, gamma, j0, F0, Omega):
+    N = len(state) // 2
+    vel = state[N:]
+    acc = spring_acc(state[:N], k, m, "fixed") - gamma * vel
+    acc[j0 - 1] += F0 / m * np.cos(Omega * t)
+    return np.concatenate((vel, acc))
 
 
-hit_ground.terminal = True
-hit_ground.direction = -1
+def run_pulse(N, k, m, j0, A, tau, ends, n_frames=3000, rtol=1e-8):
+    t_end = tau + 2 * N / omega0(k, m)
+    t = np.linspace(0, t_end, n_frames)
+    sol = solve_ivp(pulse_derivatives, (0, t_end), np.zeros(2 * N),
+                    args=(k, m, ends, j0, A, tau), method="DOP853",
+                    t_eval=t, rtol=rtol, atol=1e-9 * A)
+    return dict(t=t, j=np.arange(1, N + 1), u=sol.y[:N])
 
 
-def top_point(t, s, *args):
-    return s[3]
+def exact_pulse(t, N, k, m, j0, A, tau):
+    j = np.arange(1, N + 1)
+    s = t - np.abs(j - j0) / omega0(k, m)
+    return np.where((s > 0) & (s < tau), pulse_law(s, A, tau)[0], 0.0)
 
 
-top_point.terminal = False
-top_point.direction = -1
+def arrival_times(res, k, m, j0, A, tau):
+    side, room = long_side(len(res["j"]), j0)
+    last = int(room - omega0(k, m) * tau / 4)
+    dist, times = [], []
+    for d in range(3, last):
+        u = np.abs(res["u"][j0 - 1 + side * d])
+        if u.max() >= A / 2:
+            dist.append(d)
+            times.append(res["t"][np.argmax(u >= A / 2)])
+    return np.array(dist), np.array(times)
 
 
-def fly(v0, alpha, h0, m, k, model, g=G, n_points=600, rtol=1e-9, atol=1e-9):
-    if k == 0:
-        model = "none"
-
-    a = np.radians(alpha)
-    vx0 = v0 * np.cos(a)
-    vy0 = v0 * np.sin(a)
-    if abs(vx0) < 1e-12 * max(v0, 1.0):
-        vx0 = 0.0
-    if abs(vy0) < 1e-12 * max(v0, 1.0):
-        vy0 = 0.0
-    state = [0.0, h0, vx0, vy0]
-
-    if h0 <= 0 and vy0 <= 0:
-        return make_result(np.array([0.0]), np.array([state]).T, 0.0, 0.0, max(h0, 0.0))
-
-    length = max(h0, v0**2 / g, 1e-12)
-    speed = max(v0, np.sqrt(2 * g * h0), 1e-12)
-    atol = [atol * length, atol * length, atol * speed, atol * speed]
-
-    t_start = 0.0
-    t_end = 2 * flight_time_no_drag(v0, alpha, h0, g) + 1
-    t_top, H = 0.0, h0
-    found_top = False
-    ts, ys = [], []
-
-    for _ in range(60):
-        sol = solve_ivp(derivatives, (t_start, t_end), state, args=(m, g, k, model),
-                        method="RK23", events=(hit_ground, top_point),
-                        dense_output=True, rtol=rtol, atol=atol)
-        t_grid = np.linspace(sol.t[0], sol.t[-1], n_points)
-        ts.append(t_grid)
-        ys.append(sol.sol(t_grid))
-
-        if not found_top and len(sol.t_events[1]) > 0:
-            t_top = sol.t_events[1][0]
-            H = sol.y_events[1][0][1]
-            found_top = True
-
-        if len(sol.t_events[0]) > 0:
-            break
-        t_start, state = sol.t[-1], sol.y[:, -1]
-        t_end = t_start + 2 * t_end
-
-    t = np.concatenate(ts)
-    Y = np.concatenate(ys, axis=1)
-    Y[1, -1] = 0.0
-    return make_result(t, Y, t[-1], t_top, H)
+def measure_speed(dist, times, a):
+    if len(dist) < 5:
+        return np.nan, np.nan
+    c, b = np.polyfit(times, dist * a, 1)
+    return c, b
 
 
-def exact_no_drag(t, v0, alpha, h0, g=G):
-    a = np.radians(alpha)
-    x = v0 * np.cos(a) * t
-    y = h0 + v0 * np.sin(a) * t - g * t**2 / 2
-    return x, y
+def run_forced(N, k, m, gamma, j0, F0, Omega, n_frames=200, rtol=1e-6):
+    t_settle = 16 / gamma
+    t_end = t_settle + 2 * np.pi / Omega
+    t = np.linspace(t_settle, t_end, n_frames)
+    sol = solve_ivp(forced_derivatives, (0, t_end), np.zeros(2 * N),
+                    args=(k, m, gamma, j0, F0, Omega), method="DOP853",
+                    t_eval=t, rtol=rtol, atol=1e-9 * F0 / k)
+    u = sol.y[:N]
+    return dict(t=t, j=np.arange(1, N + 1), u=u, amp=np.abs(u).max(axis=1))
 
 
-def exact_no_drag_values(v0, alpha, h0, g=G):
-    a = np.radians(alpha)
-    T = flight_time_no_drag(v0, alpha, h0, g)
-    return dict(L=v0 * np.cos(a) * T, H=h0 + (v0 * np.sin(a))**2 / (2 * g), T=T)
+def exact_amplitude(N, k, m, gamma, j0, F0, Omega):
+    n = np.arange(1, N + 1)
+    q = mode_q(n, N)
+    w = mode_omega(n, N, k, m)
+    b = 2 / (N + 1) * F0 / m * np.sin(q * j0) / (w**2 - Omega**2 + 1j * gamma * Omega)
+    j = n.reshape(-1, 1)
+    return np.abs(np.sin(q * j) @ b)
 
 
-def phi(u):
-    u = np.asarray(u, dtype=float)
-    series = u**2 / 2 - u**3 / 6 + u**4 / 24 - u**5 / 120
-    return np.where(u < 1e-3, series, u + np.expm1(-u))
+def find_peak(Omegas, amps):
+    i = np.argmax(amps)
+    if i == 0 or i == len(amps) - 1:
+        return np.nan
+    p = np.polyfit(Omegas[i - 1:i + 2], amps[i - 1:i + 2], 2)
+    return -p[1] / (2 * p[0])
 
 
-def exact_linear(t, v0, alpha, h0, m, k, g=G):
-    if k == 0:
-        return exact_no_drag(t, v0, alpha, h0, g)
-    a = np.radians(alpha)
-    tau = m / k
-    u = np.asarray(t, dtype=float) / tau
-    e = -np.expm1(-u)
-    x = v0 * np.cos(a) * tau * e
-    y = h0 + v0 * np.sin(a) * tau * e - g * tau**2 * phi(u)
-    return x, y
+def scan_mode(n, N, k, m, gamma, j0, F0, n_points=7):
+    w = mode_omega(n, N, k, m)
+    gap = w - mode_omega(n - 1, N, k, m)
+    Omegas = np.linspace(w - gap / 3, w + gap / 3, n_points)
+    amps = np.array([run_forced(N, k, m, gamma, j0, F0, W)["amp"].max() for W in Omegas])
+    return dict(Omegas=Omegas, amps=amps, W=find_peak(Omegas, amps))
 
 
-def exact_linear_values(v0, alpha, h0, m, k, g=G):
-    a = np.radians(alpha)
-    vx0, vy0 = v0 * np.cos(a), v0 * np.sin(a)
-    tau = m / k
-    t_top, H = 0.0, h0
-    if vy0 > 0:
-        t_top = tau * np.log1p(vy0 / (g * tau))
-        H = exact_linear(t_top, v0, alpha, h0, m, k, g)[1]
-    return dict(t_top=float(t_top), H=float(H), x_inf=vx0 * tau, v_term=g * tau)
+def masses_collide(u, a):
+    return np.diff(u, axis=0).min() <= -a
