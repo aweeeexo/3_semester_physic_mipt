@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M11 Радиатор</title>
+<style>
+:root {
+  --bg: #f4f6f9; --card: #ffffff; --text: #1c2430; --muted: #66727f; --line: #dde3ea;
+  --accent: #2f6fd6; --air: #e9eef4; --board: #3f7a4a; --cpu: #111;
+  --c-cpu: #d6402f; --c-mean: #e58a12; --c-out: #2f6fd6; --c-theory: #1c2430; --c-sim: #2f6fd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --card: #171e26; --text: #e4e9ef; --muted: #8b97a4; --line: #2a3440;
+    --accent: #5b93f0; --air: #0c1116; --board: #2f6b3a; --cpu: #fff;
+    --c-cpu: #ff6a55; --c-mean: #f2a33a; --c-out: #5b93f0; --c-theory: #e4e9ef; --c-sim: #5b93f0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --card: #171e26; --text: #e4e9ef; --muted: #8b97a4; --line: #2a3440;
+  --accent: #5b93f0; --air: #0c1116; --board: #2f6b3a; --cpu: #fff;
+  --c-cpu: #ff6a55; --c-mean: #f2a33a; --c-out: #5b93f0; --c-theory: #e4e9ef; --c-sim: #5b93f0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { padding: 14px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+h1 { font-size: 18px; margin: 0; }
+h1 small { color: var(--muted); font-weight: 400; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs button { border: 1px solid var(--line); background: var(--card); color: var(--text); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; padding: 0 20px 20px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 0 16px 16px; } header { padding: 12px 16px; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.bar button { border: 1px solid var(--line); background: var(--bg); color: var(--text); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+.bar button.on { outline: 2px solid var(--accent); }
+.bar .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.bar label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+#field { width: 100%; display: block; touch-action: none; cursor: crosshair; border-radius: 6px; }
+.legend { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+#grad { flex: 1; height: 10px; border-radius: 5px; }
+.note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.stat { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+.stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+.stat.hot b { color: var(--c-cpu); }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
+.charts canvas { width: 100%; height: 240px; display: block; }
+.ctl { margin-bottom: 10px; }
+.ctl .top { display: flex; justify-content: space-between; gap: 8px; }
+.ctl .top span:last-child { font-variant-numeric: tabular-nums; color: var(--muted); }
+.ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+.ctl select { width: 100%; padding: 5px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.kv { display: grid; grid-template-columns: auto auto; gap: 2px 10px; font-size: 12px; color: var(--muted); }
+.kv b { color: var(--text); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.hide { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>M11 · Охлаждение радиатора <small>случайные блуждания порций энергии</small></h1>
+  <div class="tabs" id="tabs">
+    <button data-mode="radiator" class="on">Радиатор</button>
+    <button data-mode="rod">Проверка 1: пятно в стержне</button>
+    <button data-mode="plate">Проверка 2: остывание пластины</button>
+  </div>
+</header>
+<main>
+  <div class="col">
+    <div class="card">
+      <div class="bar">
+        <button id="play">⏸ Пауза</button>
+        <button id="reset">↺ Сброс</button>
+        <button id="heatall">Нагреть всё до 80 °C</button>
+        <span class="sep"></span>
+        <button data-tool="heat" class="on" title="Добавить +15 K в кисть (держите кнопку - греет дальше)">🔥 Паяльник</button>
+        <button data-tool="cool" title="Охладить до температуры воздуха">🧊 Лёд</button>
+        <button data-tool="metal" title="Дорисовать металл">▦ Металл</button>
+        <button data-tool="erase" title="Стереть металл (вместе с его теплом)">⌫ Ластик</button>
+        <label>кисть <input type="range" id="radius" min="0" max="4" value="1" style="width:70px"></label>
+      </div>
+      <canvas id="field"></canvas>
+      <div class="legend"><span id="lo">-</span><canvas id="grad" height="10"></canvas><span id="hi">-</span>
+        <label style="margin-left:8px"><input type="checkbox" id="fixscale"> шкала 20–100 °C</label></div>
+      <div class="note" id="note"></div>
+    </div>
+    <div class="card"><div class="stats" id="stats"></div></div>
+    <div class="charts">
+      <div class="card"><h2 id="c1t">-</h2><canvas id="chart1"></canvas></div>
+      <div class="card"><h2 id="c2t">-</h2><canvas id="chart2"></canvas></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card">
+      <h2>Скорость</h2>
+      <div class="ctl"><div class="top"><span>шагов за кадр</span><span id="spfv"></span></div>
+        <input type="range" id="spf" min="0" max="100" value="62"></div>
+      <div class="kv"><span>модельных секунд за 1 реальную</span><b id="ratio">-</b></div>
+    </div>
+    <div class="card">
+      <h2>Среда (меняется на ходу)</h2>
+      <div id="envbox"></div>
+      <label><input type="checkbox" id="cpu_on" checked> процессор включён</label>
+    </div>
+    <div class="card" id="geomcard">
+      <h2>Радиатор (меняет — сброс)</h2>
+      <div id="geombox"></div>
+    </div>
+    <div class="card">
+      <h2>Модель (меняет — сброс)</h2>
+      <div id="modelbox"></div>
+      <div class="kv" id="info"></div>
+    </div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------------------------------------------------------------- ползунки
+const ENV = [
+  ["power", "мощность процессора P, Вт", 0, 150, 1, 15],
+  ["alpha", "теплоотдача α, Вт/(м²·К)", 1, 100, 0.5, 7],
+  ["t_air", "температура воздуха, °C", 0, 45, 1, 25],
+];
+const GEOM = [
+  ["n_fins", "число рёбер", 1, 20, 1, 8],
+  ["fin_h_mm", "высота ребра, мм", 0, 80, 1, 40],
+  ["fin_t_mm", "толщина ребра, мм", 1, 8, 1, 2],
+  ["gap_mm", "зазор между рёбрами, мм", 1, 20, 1, 8],
+  ["base_mm", "толщина основания, мм", 1, 20, 1, 6],
+  ["cpu_mm", "ширина процессора, мм", 2, 60, 1, 30],
+  ["depth_mm", "длина радиатора вдоль рёбер D, мм", 10, 200, 5, 80],
+];
+const MODEL = [["q", "порций на 1 K в клетке (меньше — шумнее)", 2, 50, 1, 10]];
+const SELECTS = [
+  ["material", "материал", [["al", "алюминий"], ["cu", "медь"], ["steel", "сталь"]]],
+  ["h_mm", "размер клетки h, мм", [["1", "1"], ["2", "2"], ["3", "3"]], "2"],
+];
+
+function slider(box, [id, label, min, max, step, val], onchange) {
+  const d = document.createElement("div"); d.className = "ctl";
+  d.innerHTML = `<div class="top"><span>${label}</span><span id="${id}v">${val}</span></div>
+    <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}">`;
+  box.appendChild(d);
+  const inp = d.querySelector("input");
+  inp.addEventListener("input", () => { $(id + "v").textContent = inp.value; onchange(); });
+}
+function select(box, [id, label, opts, val], onchange) {
+  const d = document.createElement("div"); d.className = "ctl";
+  d.innerHTML = `<div class="top"><span>${label}</span></div><select id="${id}">${
+    opts.map(([v, t]) => `<option value="${v}" ${v === val ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+  box.appendChild(d);
+  d.querySelector("select").addEventListener("change", onchange);
+}
+let resetTimer = null;
+const scheduleReset = () => { clearTimeout(resetTimer); resetTimer = setTimeout(doReset, 250); };
+ENV.forEach(s => slider($("envbox"), s, sendEnv));
+GEOM.forEach(s => slider($("geombox"), s, scheduleReset));
+SELECTS.forEach(s => select($("modelbox"), s, scheduleReset));
+MODEL.forEach(s => slider($("modelbox"), s, scheduleReset));
+$("cpu_on").addEventListener("change", sendEnv);
+
+const env = () => ({ power: +$("power").value, alpha: +$("alpha").value, t_air: +$("t_air").value, cpu_on: $("cpu_on").checked });
+const params = () => {
+  const p = { mode };
+  GEOM.concat(MODEL).forEach(([id]) => p[id] = +$(id).value);
+  p.material = $("material").value; p.h_mm = +$("h_mm").value;
+  return p;
+};
+const spf = () => Math.round(Math.pow(10, +$("spf").value * 3.7 / 100));
+$("spf").addEventListener("input", () => $("spfv").textContent = spf());
+$("spfv").textContent = spf();
+
+// ---------------------------------------------------------------- связь с сервером
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  return r.json();
+}
+let st = null, mode = ["radiator", "rod", "plate"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "radiator", running = true, busy = false, tool = "heat";
+let hist = {}, lastFrame = null, ratio = null, pOutSmooth = null, pInSmooth = null;
+const clearHist = () => { hist = { t: [], a: [], b: [], c: [], d: [] }; pOutSmooth = pInSmooth = null; lastFrame = null; };
+
+async function doReset() {
+  clearHist();
+  update(await api("/api/reset", { params: params(), env: env() }));
+}
+async function sendEnv() { if (!running) update(await api("/api/step", { steps: 0, env: env() })); }
+
+async function loop() {
+  if (running && !busy) {
+    busy = true;
+    try {
+      const s = await api("/api/step", { steps: spf(), env: env() });
+      const now = performance.now();
+      if (lastFrame && st && s.t > st.t) {
+        const r = (s.t - st.t) / ((now - lastFrame.time) / 1000);
+        ratio = ratio == null ? r : ratio * 0.9 + r * 0.1;
+      }
+      lastFrame = { time: now };
+      record(s); update(s);
+      if (s.check && s.check.done) { setRunning(false); }
+    } catch (e) { console.error(e); }
+    busy = false;
+  }
+  requestAnimationFrame(loop);
+}
+function setRunning(v) { running = v; $("play").textContent = v ? "⏸ Пауза" : "▶ Пуск"; lastFrame = null; }
+
+// ---------------------------------------------------------------- история для графиков
+function record(s) {
+  const h = hist;
+  if (s.mode === "radiator") {
+    pOutSmooth = pOutSmooth == null ? s.P_out : pOutSmooth * 0.9 + s.P_out * 0.1;
+    pInSmooth = pInSmooth == null ? s.P_in : pInSmooth * 0.9 + s.P_in * 0.1;
+    h.t.push(s.t); h.a.push(s.T_cpu); h.b.push(s.T_mean); h.c.push(pInSmooth); h.d.push(pOutSmooth);
+  } else if (s.mode === "rod" && s.check) {
+    h.t.push(s.t); h.a.push(s.check.sigma2 * 1e6); h.b.push(s.check.sigma2_theory * 1e6);
+  } else if (s.mode === "plate" && s.check) {
+    h.t.push(s.t); h.a.push(s.check.dT); h.b.push(s.check.dT_theory);
+    h.c.push(s.check.dT_theory > 0.5 ? 100 * (s.check.dT / s.check.dT_theory - 1) : null);
+  }
+  if (h.t.length > 1500) for (const k in h) h[k] = h[k].filter((_, i) => i % 2 === 0);
+}
+
+// ---------------------------------------------------------------- цвета
+const STOPS = [[0, [44, 79, 140]], [0.35, [123, 63, 160]], [0.6, [217, 69, 95]], [0.8, [247, 145, 59]], [1, [255, 233, 138]]];
+function cmap(x) {
+  x = Math.max(0, Math.min(1, x));
+  for (let i = 1; i < STOPS.length; i++) if (x <= STOPS[i][0]) {
+    const [x0, c0] = STOPS[i - 1], [x1, c1] = STOPS[i], f = (x - x0) / (x1 - x0);
+    return `rgb(${c0.map((v, k) => Math.round(v + (c1[k] - v) * f)).join(",")})`;
+  }
+  return "rgb(255,233,138)";
+}
+(function drawGrad() {
+  const g = $("grad"), ctx = g.getContext("2d"); g.width = 256;
+  for (let i = 0; i < 256; i++) { ctx.fillStyle = cmap(i / 255); ctx.fillRect(i, 0, 1, 10); }
+})();
+
+// ---------------------------------------------------------------- поле
+let geom = null;   // размеры клетки на экране
+function drawField(s) {
+  const cv = $("field"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth;
+  const cw = W / s.cols;
+  let ch = cw;
+  if (s.rows * ch < 70) ch = 70 / s.rows;
+  const maxH = Math.max(260, window.innerHeight * 0.55);
+  let cww = cw;
+  if (s.rows * ch > maxH) { ch = maxH / s.rows; cww = ch; }
+  const Wd = cww * s.cols, H = ch * s.rows;
+  cv.style.height = H + "px";
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const ox = (W - Wd) / 2;
+  geom = { ox, cw: cww, ch, rows: s.rows, cols: s.cols };
+  let lo, hi;
+  if (s.mode === "rod") { lo = 0; hi = Math.max(1, ...s.values); }
+  else if ($("fixscale").checked) { lo = 20; hi = 100; }
+  else { lo = s.t_air; hi = Math.max(s.t_air + 1, s.T_max); }
+  $("lo").textContent = s.mode === "rod" ? "0" : lo.toFixed(0) + " °C";
+  $("hi").textContent = s.mode === "rod" ? Math.round(hi) + " порций" : hi.toFixed(1) + " °C";
+  ctx.fillStyle = css("--air"); ctx.fillRect(0, 0, W, H);
+  const board = css("--board");
+  for (let i = 0; i < s.rows; i++) for (let j = 0; j < s.cols; j++) {
+    const k = i * s.cols + j, c = s.cells[k];
+    if (c === "0") continue;
+    ctx.fillStyle = c === "2" ? board : cmap((s.values[k] - lo) / (hi - lo));
+    ctx.fillRect(ox + j * cww, i * ch, cww + 0.6, ch + 0.6);
+  }
+  if (s.cpu.length) {
+    const rs = s.cpu.map(k => Math.floor(k / s.cols)), cs = s.cpu.map(k => k % s.cols);
+    const r0 = Math.min(...rs), c0 = Math.min(...cs), c1 = Math.max(...cs);
+    ctx.strokeStyle = css("--cpu"); ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+    ctx.strokeRect(ox + c0 * cww + 1, r0 * ch + 1, (c1 - c0 + 1) * cww - 2, ch - 2);
+    ctx.setLineDash([]);
+    ctx.fillStyle = css("--cpu"); ctx.font = "11px system-ui"; ctx.textAlign = "center";
+    ctx.fillText("CPU " + (s.T_cpu != null ? s.T_cpu.toFixed(1) + " °C" : ""), ox + (c0 + c1 + 1) / 2 * cww, (r0 + 1) * ch + 13);
+  }
+}
+
+// ---------------------------------------------------------------- мышка
+let painting = false, cur = null, pokeTimer = null, lastCell = "";
+function cellAt(e) {
+  if (!geom) return null;
+  const r = $("field").getBoundingClientRect();
+  const col = Math.floor((e.clientX - r.left - geom.ox) / geom.cw), row = Math.floor((e.clientY - r.top) / geom.ch);
+  if (row < 0 || col < 0 || row >= geom.rows || col >= geom.cols) return null;
+  return { row, col };
+}
+async function poke() {
+  if (!cur) return;
+  const s = await api("/api/poke", { row: cur.row, col: cur.col, tool, radius: +$("radius").value, amount: 15, env: env() });
+  if (!running) update(s);
+}
+$("field").addEventListener("pointerdown", e => {
+  painting = true; $("field").setPointerCapture(e.pointerId);
+  cur = cellAt(e); lastCell = cur ? cur.row + "," + cur.col : ""; poke();
+  if (tool === "heat") pokeTimer = setInterval(poke, 150);
+});
+$("field").addEventListener("pointermove", e => {
+  if (!painting) return;
+  cur = cellAt(e);
+  const key = cur ? cur.row + "," + cur.col : "";
+  if (key !== lastCell) { lastCell = key; if (tool !== "heat") poke(); }
+});
+const stopPaint = () => { painting = false; clearInterval(pokeTimer); pokeTimer = null; };
+$("field").addEventListener("pointerup", stopPaint);
+$("field").addEventListener("pointercancel", stopPaint);
+document.querySelectorAll("[data-tool]").forEach(b => b.addEventListener("click", () => {
+  tool = b.dataset.tool;
+  document.querySelectorAll("[data-tool]").forEach(x => x.classList.toggle("on", x === b));
+}));
+
+// ---------------------------------------------------------------- графики
+function niceTicks(lo, hi, n = 5) {
+  const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * span; v += step) out.push(+v.toPrecision(10));
+  return out;
+}
+function drawChart(cv, { series, xlabel, ylabel, hlines = [], yZero = false }) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const nLeg = series.concat(hlines).filter(s => s.label).length;
+  const L = 52, R = 10, T = 10 + 15 * nLeg, B = 34;
+  let xs = [], ys = [];
+  series.forEach(s => s.x.forEach((x, i) => { if (s.y[i] != null && isFinite(s.y[i])) { xs.push(x); ys.push(s.y[i]); } }));
+  hlines.forEach(h => { if (h.y != null && isFinite(h.y)) ys.push(h.y); });
+  ctx.fillStyle = css("--muted"); ctx.font = "11px system-ui";
+  if (!xs.length) { ctx.fillText("нет данных - запустите моделирование", L, H / 2); return; }
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (yZero) y0 = Math.min(0, y0);
+  if (x1 === x0) x1 = x0 + 1;
+  if (y1 === y0) { y1 += 1; y0 -= 1; }
+  const pad = (y1 - y0) * 0.06; y0 -= yZero && y0 === 0 ? 0 : pad; y1 += pad;
+  const X = x => L + (x - x0) / (x1 - x0) * (W - L - R), Y = y => T + (1 - (y - y0) / (y1 - y0)) * (H - T - B);
+  ctx.strokeStyle = css("--line"); ctx.lineWidth = 1; ctx.textAlign = "right";
+  niceTicks(y0, y1).forEach(v => { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.fillText(+v.toPrecision(4), L - 6, Y(v) + 4); });
+  ctx.textAlign = "center";
+  niceTicks(x0, x1).forEach(v => ctx.fillText(+v.toPrecision(4), X(v), H - B + 15));
+  ctx.fillText(xlabel, (L + W - R) / 2, H - 4);
+  ctx.save(); ctx.translate(12, (T + H - B) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylabel, 0, 0); ctx.restore();
+  hlines.forEach(h => {
+    if (h.y == null || !isFinite(h.y)) return;
+    ctx.strokeStyle = h.color; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(L, Y(h.y)); ctx.lineTo(W - R, Y(h.y)); ctx.stroke(); ctx.setLineDash([]);
+  });
+  series.forEach(s => {
+    ctx.strokeStyle = ctx.fillStyle = s.color; ctx.lineWidth = s.width || 2; ctx.setLineDash(s.dash || []);
+    if (s.dots) { s.x.forEach((x, i) => { if (s.y[i] != null) { ctx.beginPath(); ctx.arc(X(x), Y(s.y[i]), 2, 0, 7); ctx.fill(); } }); }
+    else { ctx.beginPath(); let on = false; s.x.forEach((x, i) => { const y = s.y[i]; if (y == null) { on = false; return; } on ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y)); on = true; }); ctx.stroke(); }
+    ctx.setLineDash([]);
+  });
+  let ly = 14; ctx.textAlign = "left";
+  series.concat(hlines).forEach(s => { if (!s.label) return; ctx.fillStyle = s.color; ctx.fillRect(L + 8, ly - 7, 12, 3); ctx.fillStyle = css("--text"); ctx.fillText(s.label, L + 26, ly - 2); ly += 15; });
+}
+
+// ---------------------------------------------------------------- вывод
+const fmt = (v, d = 1) => v == null || !isFinite(v) ? "—" : v.toFixed(d);
+function stat(label, value, cls = "") { return `<div class="stat ${cls}"><span>${label}</span><b>${value}</b></div>`; }
+const NOTES = {
+  radiator: "Кликайте и водите мышкой по полю: паяльником греете, льдом охлаждаете, металлом/ластиком меняете форму радиатора. " +
+    "Снизу зелёная плата — через неё тепло не уходит. Тепло уходит только через грани металла, которые смотрят в воздух.",
+  rod: "Проверка 1. Стержень обёрнут теплоизоляцией (зелёное). В центральную клетку положили 200 000 порций. " +
+    "Они блуждают и расползаются «колоколом», ширина которого растёт как σ² = 2at. Точки — модель, линия — формула. " +
+    "Пауза включится сама, когда пятно дорастёт до концов стержня.",
+  plate: "Проверка 2. Тонкая пластина 80×6 мм нагрета на 50 K и висит в воздухе. Она тонкая, поэтому прогрета почти одинаково, " +
+    "и остывает по формуле ΔT = ΔT₀·e^(−t/τ), τ = C/(αS). Увеличьте α, чтобы остывание шло быстрее.",
+};
+function update(s) {
+  st = s;
+  if (s.mode !== mode) { mode = s.mode; }
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  $("geomcard").classList.toggle("hide", mode !== "radiator");
+  $("heatall").classList.toggle("hide", mode === "rod");
+  $("note").textContent = NOTES[mode];
+  drawField(s);
+  $("ratio").textContent = running && ratio != null ? fmt(ratio, 1) + " с" : "—";
+  const e = s.est;
+  let html = stat("время модели", fmt(s.t, s.t < 10 ? 2 : 0) + " с");
+  if (mode === "radiator") {
+    html += stat("T процессора", fmt(s.T_cpu) + " °C", s.T_cpu > 95 ? "hot" : "")
+      + stat("T средняя / макс", fmt(s.T_mean) + " / " + fmt(s.T_max) + " °C")
+      + stat("оценка T = T₀ + P/(αS)", e.T_simple == null ? "—" : fmt(e.T_simple) + " °C")
+      + stat("P от процессора", fmt(pInSmooth ?? s.P_in, 2) + " Вт")
+      + stat("P в воздух", fmt(pOutSmooth ?? s.P_out, 2) + " Вт")
+      + stat("τ = C/(αS)", fmt(e.tau, 0) + " с")
+      + stat("площадь S", fmt(e.S * 1e4, 0) + " см²")
+      + stat("масса", fmt(e.mass * 1000, 0) + " г");
+  } else if (mode === "rod" && s.check) {
+    html += stat("шагов", s.steps) + stat("σ² модель", fmt(s.check.sigma2 * 1e6, 3) + " мм²")
+      + stat("σ² = 2at", fmt(s.check.sigma2_theory * 1e6, 3) + " мм²")
+      + stat("расхождение", s.steps ? fmt(100 * (s.check.sigma2 / s.check.sigma2_theory - 1), 2) + " %" : "—");
+  } else if (mode === "plate" && s.check) {
+    html += stat("ΔT модель", fmt(s.check.dT, 2) + " K") + stat("ΔT формула", fmt(s.check.dT_theory, 2) + " K")
+      + stat("τ = C/(αS)", fmt(s.check.tau, 0) + " с") + stat("t / τ", fmt(s.t / s.check.tau, 2));
+  }
+  html += stat("энергия: пришло − ушло", fmt(s.E_in - s.E_out, 1) + " Дж") + stat("энергия в металле", fmt(s.E_stored, 1) + " Дж");
+  $("stats").innerHTML = html;
+  $("info").innerHTML = [
+    ["материал", s.material], ["a = λ/(cρ)", (s.a * 1e6).toFixed(1) + " мм²/с"],
+    ["шаг dt = h²/(8a)", (s.dt * 1000).toFixed(3) + " мс"], ["s = αh/λ", s.s_escape.toExponential(2)],
+    ["порция ε", (s.eps * 1000).toFixed(2) + " мДж"], ["клеток металла", s.n_cells],
+  ].map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join("");
+  drawCharts(s);
+}
+function drawCharts(s) {
+  const h = hist, red = css("--c-cpu"), orange = css("--c-mean"), blue = css("--c-out"), ink = css("--c-theory"), muted = css("--muted");
+  if (mode === "radiator") {
+    $("c1t").textContent = "Температура от времени"; $("c2t").textContent = "Мощность: пришло и ушло";
+    drawChart($("chart1"), { xlabel: "t, с", ylabel: "T, °C", series: [
+      { x: h.t, y: h.a, color: red, label: "процессор" }, { x: h.t, y: h.b, color: orange, label: "среднее по металлу" }],
+      hlines: [{ y: s.est.T_simple, color: muted, label: "T₀ + P/(αS)" }] });
+    drawChart($("chart2"), { xlabel: "t, с", ylabel: "P, Вт", yZero: true, series: [
+      { x: h.t, y: h.c, color: red, label: "от процессора (сглажено)" }, { x: h.t, y: h.d, color: blue, label: "в воздух (сглажено)" }] });
+  } else if (mode === "rod") {
+    $("c1t").textContent = "Профиль: порций в клетке"; $("c2t").textContent = "Ширина пятна σ² от времени";
+    const c = s.check || { j: [], sim: [], theory: [] };
+    drawChart($("chart1"), { xlabel: "номер клетки от центра", ylabel: "порций", series: [
+      { x: c.j, y: c.sim, color: blue, dots: true, label: "модель" }, { x: c.j, y: c.theory, color: ink, width: 1.5, label: "формула (колокол)" }] });
+    drawChart($("chart2"), { xlabel: "t, с", ylabel: "σ², мм²", yZero: true, series: [
+      { x: h.t, y: h.a, color: blue, dots: true, label: "модель" }, { x: h.t, y: h.b, color: ink, width: 1.5, label: "2at" }] });
+  } else {
+    $("c1t").textContent = "Перегрев пластины ΔT от времени"; $("c2t").textContent = "Отличие модели от формулы";
+    drawChart($("chart1"), { xlabel: "t, с", ylabel: "ΔT, K", yZero: true, series: [
+      { x: h.t, y: h.a, color: blue, dots: true, label: "модель" }, { x: h.t, y: h.b, color: ink, width: 1.5, label: "ΔT₀·e^(−t/τ)" }] });
+    drawChart($("chart2"), { xlabel: "t, с", ylabel: "ошибка, %", series: [{ x: h.t, y: h.c, color: blue, label: "(модель/формула − 1)·100%" }],
+      hlines: [{ y: 0, color: muted }] });
+  }
+}
+
+// ---------------------------------------------------------------- кнопки
+$("play").addEventListener("click", () => setRunning(!running));
+$("reset").addEventListener("click", doReset);
+$("heatall").addEventListener("click", async () => { const s = await api("/api/heat_all", { temp: 80, env: env() }); if (!running) update(s); });
+$("fixscale").addEventListener("change", () => st && update(st));
+document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => { mode = b.dataset.mode; history.replaceState(null, "", "#" + mode); setRunning(true); doReset(); }));
+window.addEventListener("resize", () => st && update(st));
+doReset().then(loop);
+</script>
+</body>
+</html>
